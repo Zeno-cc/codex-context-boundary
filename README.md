@@ -1,4 +1,6 @@
-# Codex Context Boundary
+# Codex Context Boundary | opencodex 上下文边界修复 Skill
+
+> Codex/opencodex skill for encrypted reasoning, context compaction, `invalid_encrypted_content`, model switching, and routed-provider failures.
 
 一个面向 Codex 和 opencodex provider proxy 的上下文边界修复方案，专门处理模型、供应商、适配器、目标地址或凭据切换后，隐藏 reasoning 与 compaction 状态被错误复用的问题。
 
