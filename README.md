@@ -4,6 +4,8 @@
 
 它解决的不是普通对话文本丢失，而是“看得见的对话还在，但看不见的加密推理状态不属于当前 provider”这一类协议问题。
 
+本方案来自使用 [OpenCoded](https://github.com/lidge-jun/opencodex) 的实际场景。OpenCoded 是一个本地 provider proxy，把 Codex 的 Responses API 转换到不同模型和供应商；正因为它让 Codex 可以接入更多模型，provider 之间的隐藏状态边界也需要被明确处理。
+
 ## 这是什么
 
 Codex 的 Responses 历史里可能包含以下几类内容：
@@ -218,3 +220,9 @@ skill 的自动触发依赖 Codex 对用户请求的语义匹配，并不是桌�
 ## 项目状态
 
 这是一个针对本地 Codex/OpenCoded 兼容层的修复方案，不是 OpenAI 官方组件。它适用于明确经过本地代理的请求；使用前应确认代理来源、运行权限和上游 provider 配置都符合自己的环境。
+
+## 上游项目与致谢
+
+特别感谢 [lidge-jun](https://github.com/lidge-jun) 以及 [OpenCoded 项目](https://github.com/lidge-jun/opencodex) 的贡献者，提供了一个实用的本地 provider proxy，让 Codex、Claude Code、Claude Desktop 和 Grok Build 可以使用更多模型与供应商。这个工具的路由、适配器和多模型能力是本方案能够被发现和验证的基础。
+
+本仓库记录的是使用 OpenCoded 时发现的本地兼容层问题与修复思路，不代表 OpenCoded 官方实现，也不是对上游代码的替代版本。请优先阅读上游仓库的安装说明、文档、贡献指南和许可条款；OpenCoded 使用 MIT License，本方案对上游项目保持链接和致谢。
