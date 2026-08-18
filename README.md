@@ -116,6 +116,19 @@ ocx start
 
 如果本机已经安装并运行 opencodex，不需要重复安装；升级后应重新运行本方案的 `--check`。
 
+### 安装本 skill
+
+仓库现在包含可直接复制的 `skills/codex-context-boundary/` skill，以及显式命令 prompt。clone 后执行：
+
+```bash
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+mkdir -p "$CODEX_HOME/skills" "$CODEX_HOME/prompts"
+cp -R skills/codex-context-boundary "$CODEX_HOME/skills/"
+cp prompts/context-boundary-repair.md "$CODEX_HOME/prompts/"
+```
+
+重启 Codex 后，使用 `$codex-context-boundary`；如果同时安装了 prompt，也可以使用 `/prompts:context-boundary-repair` 直接执行一次性修复。
+
 ### 在 Codex 中显式调用
 
 在 Codex composer 中使用：
@@ -239,4 +252,4 @@ skill 的自动触发依赖 Codex 对用户请求的语义匹配，并不是桌�
 
 特别感谢 [lidge-jun](https://github.com/lidge-jun) 以及 [opencodex 项目](https://github.com/lidge-jun/opencodex) 的贡献者，提供了一个实用的本地 provider proxy，让 Codex、Claude Code、Claude Desktop 和 Grok Build 可以使用更多模型与供应商。这个工具的路由、适配器和多模型能力是本方案能够被发现和验证的基础。
 
-本仓库目前只发布这份说明文档，不包含本机的 Codex skill 脚本；文中的 `ensure_provider_boundary.py` 需要先安装到自己的 `$CODEX_HOME/skills/codex-context-boundary`，clone 本仓库本身不会自动获得该脚本。本文记录的是使用 opencodex 时发现的本地兼容层问题与修复思路，不代表 opencodex 官方实现，也不是对上游代码的替代版本。请优先阅读上游仓库的安装说明、文档、贡献指南和许可条款；opencodex 使用 MIT License，本方案对上游项目保持链接和致谢。
+本仓库包含可分发的 Codex skill（`skills/codex-context-boundary/`）和显式命令 prompt（`prompts/context-boundary-repair.md`）。本文与 skill 记录的是使用 opencodex 时发现的本地兼容层问题与修复思路，不代表 opencodex 官方实现，也不是对上游代码的替代版本。请优先阅读上游仓库的安装说明、文档、贡献指南和许可条款；opencodex 使用 MIT License，本方案对上游项目保持链接和致谢。
