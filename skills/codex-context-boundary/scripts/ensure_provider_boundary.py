@@ -210,7 +210,40 @@ STRIP_FOREIGN = '''/**\n * Keep native ChatGPT reasoning only when it has the na
 STRIP_ROUTED = '''/**\n * Routed providers must not receive opaque reasoning minted by a different\n * physical route. Native OpenAI ciphertext is recognizable even after a proxy\n * restart; the routeChanged flag covers arbitrary provider-specific ciphertext\n * (for example Grok -> CII) while preserving same-provider continuations.\n */\nexport function stripRoutedForeignReasoningInputItems(\n  body: unknown,\n  routeChanged = false,\n): unknown {\n  if (!isPlainObject(body) || !Array.isArray(body.input)) return body;\n  const input = body.input.filter(item => {\n    if (!isPlainObject(item)) return true;\n    const isCompaction = item.type === "compaction"\n      || item.type === "compaction_summary"\n      || item.type === "context_compaction";\n    if (isCompaction) {\n      const encrypted = item.encrypted_content;\n      if (typeof encrypted !== "string" || encrypted.startsWith("ocx1:")) return true;\n      return !routeChanged && !/^gAAAA[A-Za-z0-9_-]+={0,2}$/.test(encrypted);\n    }\n    if (item.type !== "reasoning") return true;\n    const encrypted = item.encrypted_content;\n    if (typeof encrypted !== "string") return true;\n    return !routeChanged && !/^gAAAA[A-Za-z0-9_-]+={0,2}$/.test(encrypted);\n  });\n  return input.length === body.input.length ? body : { ...body, input };\n}\n'''
 
 
-NORMALIZE_ROUTED_AGENT_MESSAGES = '''/**\n * `agent_message` is a Codex Desktop collaboration item, not an OpenAI\n * Responses input type understood by third-party compatible providers. Routed\n * providers therefore receive it as an ordinary user turn, just as the parsed\n * conversation view does. Keep this out of the native OpenAI forwarding path,\n * where the desktop protocol remains supported end-to-end.\n */\nexport function normalizeRoutedAgentMessages(body: unknown): unknown {\n  if (!isPlainObject(body) || !Array.isArray(body.input)) return body;\n\n  let changed = false;\n  const input = body.input.map(item => {\n    if (!isPlainObject(item) || item.type !== "agent_message") return item;\n    changed = true;\n    return {\n      type: "message",\n      role: "user",\n      content: item.content ?? [{ type: "input_text", text: "(sub-agent message received)" }],\n    };\n  });\n\n  return changed ? { ...body, input } : body;\n}\n'''
+# Keep a visible-content-only normalizer so fresh and upgraded installs
+# converge on one safe implementation.
+NORMALIZE_ROUTED_AGENT_MESSAGES = """/**
+ * `agent_message` is a Codex Desktop collaboration item, not an OpenAI
+ * Responses input type understood by third-party compatible providers. Routed
+ * providers therefore receive it as an ordinary user turn, just as the parsed
+ * conversation view does. Keep this out of the native OpenAI forwarding path,
+ * where the desktop protocol remains supported end-to-end.
+ */
+export function normalizeRoutedAgentMessages(body: unknown): unknown {
+  if (!isPlainObject(body) || !Array.isArray(body.input)) return body;
+
+  let changed = false;
+  const input = body.input.map(item => {
+    if (!isPlainObject(item) || item.type !== "agent_message") return item;
+    changed = true;
+    const content = Array.isArray(item.content)
+      ? item.content.filter(part => {
+        if (!isPlainObject(part)) return true;
+        return part.type !== "encrypted_content" && typeof part.encrypted_content !== "string";
+      })
+      : [];
+    return {
+      type: "message",
+      role: "user",
+      content: content.length > 0
+        ? content
+        : [{ type: "input_text", text: "(sub-agent message received)" }],
+    };
+  });
+
+  return changed ? { ...body, input } : body;
+}
+"""
 
 
 def ensure_routed_agent_message_normalization(root: Path, plan: PatchPlan | None = None) -> bool:
@@ -221,6 +254,12 @@ def ensure_routed_agent_message_normalization(root: Path, plan: PatchPlan | None
     if "export function normalizeRoutedAgentMessages" not in text:
         anchor = "\n/**\n * Strip unsupported `reasoning` sub-parameters for native slugs that reject them (e.g. Spark).\n"
         operations.append((anchor, "\n" + normalizer + anchor, "routed agent-message normalizer"))
+    elif 'part.type !== "encrypted_content"' not in text:
+        start = text.find("/**\n * `agent_message` is a Codex Desktop collaboration item")
+        end = text.find("\n/**\n * Strip unsupported `reasoning` sub-parameters", start)
+        if start < 0 or end < 0:
+            raise RepairError("无法定位 agent_message 过滤区；可能是版本不兼容")
+        operations.append((text[start:end], normalizer.rstrip("\n"), "agent-message encrypted-content sanitizer"))
     if "const routedBody = isCanonicalOpenAiForwardProvider(provider)" not in text:
         old = '''      const sanitizedBody = normalizeToolSchemas(stripSparkCompatibility(stripUnsupportedReasoningParams(stripItemIdsWhenUnstored(stripInvalidItemIds(stripUnsupportedHostedTools(sanitizeReasoningInputContent(scrubOcxCompactionItems(outBody), { preserveRawReasoningContent: provider.preserveResponsesReasoningContent === true })))))));\n'''
         new = '''      const routedBody = isCanonicalOpenAiForwardProvider(provider)\n        ? outBody\n        : normalizeRoutedAgentMessages(outBody);\n      const sanitizedBody = normalizeToolSchemas(stripSparkCompatibility(stripUnsupportedReasoningParams(stripItemIdsWhenUnstored(stripInvalidItemIds(stripUnsupportedHostedTools(sanitizeReasoningInputContent(scrubOcxCompactionItems(routedBody), { preserveRawReasoningContent: provider.preserveResponsesReasoningContent === true })))))));\n'''
@@ -322,6 +361,7 @@ def missing_markers(root: Path, plan: PatchPlan | None = None) -> list[str]:
             "export function stripForeignReasoningInputItems",
             "export function stripRoutedForeignReasoningInputItems",
             "export function normalizeRoutedAgentMessages",
+            'part.type !== "encrypted_content"',
             "parsed._reasoningReplayScope?.routeChanged === true",
             "const routedBody = isCanonicalOpenAiForwardProvider(provider)",
             'item.type === "compaction_summary"',

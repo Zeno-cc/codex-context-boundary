@@ -15,7 +15,7 @@ Use `$codex-context-boundary` in Codex when you need diagnosis or explanation ar
 
 - Treat reasoning.encrypted_content and foreign encrypted compaction items as opaque, provider-scoped replay state, never as portable conversation text. The local `ocx1:` compaction envelope is a decodable exception.
 - On a physical route boundary, remove old opaque reasoning and foreign compaction items when the proxy still has the previous route binding; route bindings are bounded by a one-hour TTL and a 1024-entry cap.
-- Convert Codex Desktop `agent_message` items to standard user messages before forwarding to a third-party routed provider; preserve the native OpenAI path unchanged.
+- Convert Codex Desktop `agent_message` items to standard user messages before forwarding to a third-party routed provider, dropping nested `encrypted_content` parts; preserve the native OpenAI path unchanged.
 - Do not proactively delete user messages, visible assistant messages, developer instructions, or tool results at the boundary; adapters may rewrite tool schemas, IDs, or custom-tool wire shape, and formal compaction may summarize or replace history.
 - Do not edit Codex session JSONL files or delete continuation state as a first-line fix.
 - Expect hidden reasoning continuity to restart after a provider/model switch. Visible continuity depends on the client sending full history or the proxy successfully expanding continuation state; that state has TTL and capacity limits.

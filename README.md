@@ -64,7 +64,7 @@ OpenAI reasoning state
 - 原生 OpenAI 路径只保留原生可识别的 reasoning 和 compaction 形态，并在必要时先解码 opencodex 自己生成的 `ocx1:` 摘要；
 - routed provider 路径不接收其他物理路线产生的 opaque reasoning 或 compaction，但可以处理可解码的 `ocx1:` 摘要；
 - `/responses/compact` 直连转发前也执行 reasoning 清理；
-- Codex Desktop 的 `agent_message` 在 routed provider 路径上转换为普通 user message；
+- Codex Desktop 的 `agent_message` 在 routed provider 路径上转换为普通 user message，并过滤其中嵌套的 `encrypted_content`；
 - 边界过滤阶段不主动删除用户消息、可见 assistant 内容和工具结果；adapter 仍可能为上游兼容性重写 tool schema、item ID 或 custom tool 结构，正式 compaction 也可能按协议用摘要替换部分历史。
 
 ### 3. 用幂等脚本恢复安装状态

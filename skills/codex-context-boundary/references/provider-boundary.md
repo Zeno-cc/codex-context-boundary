@@ -14,4 +14,6 @@ The enforcement points are:
 2. Normal Responses passthrough serialization.
 3. Route identity binding for provider, destination, adapter, model, and credential.
 
+Routed `agent_message` items need the same treatment: keep visible text parts, but drop nested `encrypted_content` parts before sending them to a third-party provider.
+
 The bundled repair script is deliberately conservative. It uses explicit source anchors, preflights all four files before committing, compiles the affected files, and refuses to mutate an unknown opencodex layout.
