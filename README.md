@@ -1,6 +1,6 @@
-# Codex Context Boundary | opencodex 上下文边界修复 Skill
+# Codex / opencodex 上下文压缩与子代理解密修复 Skill
 
-> Codex/opencodex skill for encrypted reasoning, context compaction, `invalid_encrypted_content`, model switching, and routed-provider failures.
+> Repair `invalid_encrypted_content`, `unreadable_encrypted_agent_task`, context compaction failures, model switching, routed subagents, and reboot-unsafe opencodex routing.
 
 一个面向 Codex 和 opencodex provider proxy 的上下文边界修复方案，专门处理模型、供应商、适配器、目标地址或凭据切换后，隐藏 reasoning 与 compaction 状态被错误复用的问题。
 
@@ -41,7 +41,7 @@ OpenAI reasoning state
                     └── 无法解密或不接受该 opaque 状态
 ```
 
-子 agent 场景也可能触发类似问题。Codex Desktop 的 `agent_message` 是协作协议中的内部 item，第三方 OpenAI-compatible provider 不一定认识这种类型；如果直接转发，也可能在子 agent 回复后出现 400、502 或重连失败。
+子 agent 场景还有一个更严格的问题：V2 worker assignment 可能只有原生 ChatGPT 加密的任务密文，第三方 provider 无法直接读取。此时仅过滤密文会得到空任务；opencodex 2.25.0 的 `agentTaskRecovery` 会先通过已认证的原生 ChatGPT Codex endpoint 恢复任务明文，再交给 routed provider。若本机 ChatGPT/Codex 登录已失效，恢复仍会失败，需要重新登录，skill 不能绕过认证。
 
 ## 怎么做
 
@@ -67,18 +67,18 @@ OpenAI reasoning state
 - Codex Desktop 的 `agent_message` 在 routed provider 路径上转换为普通 user message，并过滤其中嵌套的 `encrypted_content`；
 - 边界过滤阶段不主动删除用户消息、可见 assistant 内容和工具结果；adapter 仍可能为上游兼容性重写 tool schema、item ID 或 custom tool 结构，正式 compaction 也可能按协议用摘要替换部分历史。
 
-### 3. 用幂等脚本恢复安装状态
+### 3. 用幂等脚本恢复完整健康链
 
-补丁写入阶段只修改四个明确的 opencodex 源文件，流程是：
+完整修复脚本会检查并恢复：
 
-1. 定位本地 opencodex 安装；
-2. 检查源码锚点与结构；
-3. 先在内存中完成四个文件的全量预检，只在锚点唯一且结构兼容时一次性写入补丁；
-4. 编译受影响的 Bun 入口；
-5. 重启代理并检查健康状态；
-6. 如果已经安装，则返回 `already-installed`，不重复修改。
+1. provider-boundary 四个源码文件及精确锚点；
+2. Codex 根级 `model_provider` 与 opencodex 本地路由归属；
+3. `agentTaskRecovery`；
+4. launchd 后台服务与重启保护；
+5. Codex runtime 和模型目录同步；
+6. proxy health/ready 与最终 `rebootSafe` 状态。
 
-脚本不会通过猜测文本、重写历史会话或删除错误记录来“掩盖”问题。结构不兼容时会停止并报告，且不会提交前序文件；重启步骤仍会产生正常的运行时状态变化。
+源码补丁先在临时镜像中完成 Bun 编译，成功后才原子提交；多文件写入、代理重启或健康检查失败时会恢复本次源码改动。脚本不会通过猜测文本、重写历史会话或删除错误记录来“掩盖”问题。
 
 ## 能解决什么
 
@@ -88,6 +88,9 @@ OpenAI reasoning state
 - 上下文压缩提示 encrypted content 无法解密或解析；
 - 因不兼容 `agent_message` 或外来 opaque state 而出现、且错误证据指向该原因的 400/502/重连失败；
 - routed provider 收到不认识的 Codex `agent_message`；
+- V2 子代理任务报 `unreadable_encrypted_agent_task`；
+- 根级自定义本地 provider 抢占 opencodex 路由，导致 `rebootSafe=false`；
+- opencodex 后台服务、Codex runtime 或 catalog sync 失配；
 - opencodex 升级或重装后原有 provider-boundary 补丁被覆盖；
 - 在客户端重新发送完整可见输入、或代理成功展开 continuation history 时，保留可见上下文并安全地重新开始隐藏推理连续性。
 
@@ -102,6 +105,7 @@ OpenAI reasoning state
 - 已经被用户手动删除的历史内容；
 - opencodex continuation state 已过期或被容量上限淘汰，而当前请求又没有携带完整 history；这时无法保证可见上下文或 tool pairing 完整；
 - 需要恢复上一 provider 隐藏 reasoning 的场景。
+- ChatGPT/Codex OAuth 已退出、换号或 refresh token 失效；这时必须重新登录。
 
 看到 502 或 503 时，先区分它是上游可用性错误，还是错误内容中同时包含了新的 `invalid_encrypted_content`。不要因为一次 502 就反复重启代理。
 
@@ -155,7 +159,7 @@ $codex-context-boundary
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 SKILL_ROOT="$CODEX_HOME/skills/codex-context-boundary"
 
-python3 "$SKILL_ROOT/scripts/ensure_provider_boundary.py" --check
+python3 "$SKILL_ROOT/scripts/repair_opencodex_health.py" --check
 ```
 
 ### 在终端中修复
@@ -164,20 +168,26 @@ python3 "$SKILL_ROOT/scripts/ensure_provider_boundary.py" --check
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 SKILL_ROOT="$CODEX_HOME/skills/codex-context-boundary"
 
-python3 "$SKILL_ROOT/scripts/ensure_provider_boundary.py" --repair
+python3 "$SKILL_ROOT/scripts/repair_opencodex_health.py" \
+  --repair \
+  --adopt-opencodex-route
 ```
 
-如果只需要确认补丁能否安全应用而不想重启代理，可以使用：
+`--adopt-opencodex-route` 表示明确授权 opencodex 接管一个冲突的本地自定义路由。脚本会先备份 `config.toml`；它不会接管远程自定义 provider，也不会重启 Codex Desktop。
+
+如果只想单独检查或修复四个源码边界文件，可以使用高级入口：
 
 ```bash
+python3 "$SKILL_ROOT/scripts/ensure_provider_boundary.py" --check
 python3 "$SKILL_ROOT/scripts/ensure_provider_boundary.py" --repair --no-restart
 ```
 
 如果 opencodex 安装位置不是脚本自动发现的路径，可以显式指定：
 
 ```bash
-python3 "$SKILL_ROOT/scripts/ensure_provider_boundary.py" \
+python3 "$SKILL_ROOT/scripts/repair_opencodex_health.py" \
   --repair \
+  --adopt-opencodex-route \
   --source-root /absolute/path/to/opencodex
 ```
 
@@ -185,12 +195,15 @@ python3 "$SKILL_ROOT/scripts/ensure_provider_boundary.py" \
 
 ## 验证结果应该怎么看
 
-健康的检查结果通常包含：
+健康的完整检查结果会包含：
 
 ```json
 {
   "ok": true,
-  "missing": []
+  "routing": {"kind": "opencodex-local", "reboot_safe": true},
+  "proxy": {"running": true, "healthy": true, "ready": true},
+  "agent_task_recovery": {"enabled": true},
+  "failures": []
 }
 ```
 
@@ -215,14 +228,11 @@ python3 "$SKILL_ROOT/scripts/ensure_provider_boundary.py" \
 - 不把 skill 描述成可以监听每一次桌面模型切换的后台服务；
 - 真正的强制执行点是 opencodex adapter，skill 是检查和自愈流程。
 
-## 验证过的场景
+## 验证状态
 
-在同一台本地代理上，使用 `gpt-5.6-luna` 和 `grok/grok-4.5` 做过一次本机 smoke test，分别验证以下两类请求：
+本机已验证：源码边界标记、staged Bun build、重复 repair 幂等性、`opencodex-local` 路由、`rebootSafe=true`、后台 service、runtime、catalog sync、proxy health/ready 和 `agentTaskRecovery` 开关。
 
-1. 用“OpenAI 切换到 Grok 后发生上下文压缩解密失败”的自然语言描述测试自动 skill 触发；
-2. 使用 `$codex-context-boundary` 测试显式 skill 调用。
-
-这次本机测试中，两种模型都识别了相关 skill，`--check` 返回无缺失标记，幂等修复返回 `already-installed`，代理健康检查返回 `ok: true`。这是一次特定本机配置下的 smoke test，不等同于所有版本、账号或 provider 组合都已覆盖。
+真实 Luna 子代理冒烟测试已不再返回 `unreadable_encrypted_agent_task`，但当前机器停在 ChatGPT access token 无法刷新，因此尚未完成 routed 子代理的端到端成功验证。重新登录 ChatGPT/Codex 后应再次运行一个新的子代理任务；旧的失败 child task 不会被追溯修复。
 
 ## 设计取舍
 
@@ -244,7 +254,11 @@ skill 的自动触发依赖 Codex 对用户请求的语义匹配，并不是桌�
 
 ### opencodex 升级后怎么办？
 
-先运行 `--check`。如果标记缺失，再运行 `--repair`。如果脚本报告版本结构不兼容，应停止并针对新版本重新定位边界，不要反复重启。
+先运行完整 `--check`。发现 managed health failure 后运行带 `--adopt-opencodex-route` 的完整 `--repair`。如果脚本报告版本结构不兼容，应停止并针对新版本重新定位边界，不要反复重启。
+
+### 以后还会不会再发生？
+
+代理层补丁和重启保护已覆盖当前已知路径，重复 repair 也不会再把旧根路由写回来；但 opencodex 升级可能覆盖源码，账号登录也可能过期。因此这里的“永久”含义是可重复检测和自愈，不是永远无需维护。升级后重新执行 `/prompts:context-boundary-repair` 即可恢复受管理状态。
 
 ## 项目状态
 

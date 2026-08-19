@@ -1,7 +1,7 @@
 interface:
   display_name: "Codex Context Boundary"
-  short_description: "Repair model-switch context encryption safely"
-  default_prompt: "Use $codex-context-boundary to verify and repair provider-boundary handling; if the bundled prompt is installed, use /prompts:context-boundary-repair for the one-shot repair command."
+  short_description: "Repair routed context and subagent decryption"
+  default_prompt: "Use $codex-context-boundary to check and repair opencodex routing, reboot protection, encrypted context, and V2 subagent delivery."
 
 policy:
   allow_implicit_invocation: true

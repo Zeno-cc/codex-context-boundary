@@ -87,8 +87,22 @@ class PatchPlan:
     def stage(self, path: Path, text: str) -> None:
         self.updates[path] = text
 
-    def commit(self) -> None:
-        for path, text in self.updates.items():
+    def commit(self) -> dict[Path, str]:
+        originals = {path: path.read_text(encoding="utf-8") for path in self.updates}
+        written: list[Path] = []
+        try:
+            for path, text in self.updates.items():
+                atomic_write(path, text)
+                written.append(path)
+        except Exception:
+            for path in reversed(written):
+                atomic_write(path, originals[path])
+            raise
+        return originals
+
+    @staticmethod
+    def restore(originals: dict[Path, str]) -> None:
+        for path, text in originals.items():
             atomic_write(path, text)
 
 
@@ -385,7 +399,7 @@ def binary(name: str, extras: tuple[Path, ...]) -> str | None:
     return shutil.which(name)
 
 
-def compile_sources(root: Path) -> None:
+def compile_sources(root: Path, plan: PatchPlan | None = None) -> None:
     bun = binary("bun", (
         root / "node_modules/bun/bin/bun.exe",
         Path("/opt/homebrew/lib/node_modules/@bitkyc08/opencodex/node_modules/bun/bin/bun.exe"),
@@ -395,14 +409,31 @@ def compile_sources(root: Path) -> None:
     ))
     if not bun:
         raise RepairError("找不到 Bun，无法验证代理源码")
-    with tempfile.TemporaryDirectory(prefix="codex-context-boundary-") as output:
+    with tempfile.TemporaryDirectory(prefix="codex-context-boundary-") as temporary:
+        temporary_root = Path(temporary)
+        staged_root = temporary_root / "opencodex"
+        shutil.copytree(root / "src", staged_root / "src")
+        for name in ("package.json", "bunfig.toml", "tsconfig.json"):
+            source = root / name
+            if source.is_file():
+                shutil.copy2(source, staged_root / name)
+        node_modules = root / "node_modules"
+        if node_modules.exists():
+            (staged_root / "node_modules").symlink_to(node_modules, target_is_directory=True)
+        if plan is not None:
+            for path, text in plan.updates.items():
+                relative = path.relative_to(root)
+                staged_path = staged_root / relative
+                staged_path.parent.mkdir(parents=True, exist_ok=True)
+                staged_path.write_text(text, encoding="utf-8")
+        output = temporary_root / "build"
         result = run([
             bun, "build",
-            str(root / "src/server/responses/compact.ts"),
-            str(root / "src/adapters/openai-responses.ts"),
-            str(root / "src/responses/reasoning-replay-cache.ts"),
-            "--outdir", output, "--target", "bun",
-        ], root)
+            str(staged_root / "src/server/responses/compact.ts"),
+            str(staged_root / "src/adapters/openai-responses.ts"),
+            str(staged_root / "src/responses/reasoning-replay-cache.ts"),
+            "--outdir", str(output), "--target", "bun",
+        ], staged_root)
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()[-2000:]
             raise RepairError(f"Bun 解析/打包失败，代理未重启：{detail}")
@@ -466,12 +497,22 @@ def main() -> int:
         missing = missing_markers(root, plan)
         if missing:
             raise RepairError("修复后仍缺少边界标记：" + "; ".join(missing))
-        plan.commit()
+        compile_sources(root, plan)
+        originals = plan.commit()
         missing = missing_markers(root)
         if missing:
+            plan.restore(originals)
             raise RepairError("提交修复后仍缺少边界标记：" + "; ".join(missing))
-        compile_sources(root)
-        health = None if args.no_restart else restart_health(root)
+        try:
+            health = None if args.no_restart else restart_health(root)
+        except RepairError:
+            plan.restore(originals)
+            if not args.no_restart:
+                try:
+                    restart_health(root)
+                except RepairError:
+                    pass
+            raise
         result = {
             "ok": True,
             "source_root": str(root),
